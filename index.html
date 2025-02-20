@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Battleship Game</title>
+    <style>
+        .status {
+            margin: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+        }
+        
+        .grid {
+            display: inline-grid;
+            grid-template-columns: repeat(10, 30px);
+            grid-template-rows: repeat(10, 30px);
+            gap: 1px;
+            background-color: #ccc;
+            padding: 10px;
+            margin: 20px;
+            border: 2px solid #333;
+            width: fit-content;
+            height: fit-content;
+        }
+        
+        .cell {
+            width: 30px;
+            height: 30px;
+            background-color: #fff;
+            border: 1px solid #999;
+            cursor: pointer;
+            box-sizing: border-box;
+            display: inline-block;
+        }
+        
+        .ship {
+            background-color: #666;
+        }
+        
+        .hit {
+            background-color: #ff4444;
+        }
+        
+        .miss {
+            background-color: #44ff44;
+        }
+        
+        .grid-container {
+            display: flex;
+            justify-content: center;
+            align-items: start;
+            gap: 20px;
+            margin: 20px auto;
+        }
+        
+        .grid-label {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .ship-preview {
+            background-color: rgba(102, 102, 102, 0.5);
+        }
+        
+        .ship-preview.valid {
+            background-color: rgba(0, 255, 0, 0.3);
+        }
+        
+        .ship-preview.invalid {
+            background-color: rgba(255, 0, 0, 0.3);
+        }
+        
+        #current-ship-info {
+            font-weight: bold;
+            margin: 10px;
+            color: #333;
+        }
+        
+        .ship-selection {
+            margin: 10px;
+            padding: 5px;
+        }
+        
+        .orientation-toggle {
+            margin: 10px;
+        }
+        
+        #game-board {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="status" id="connection-status">Not connected</div>
+    <button id="join-game">Join Game</button>
+    
+    <div id="game-board" style="display: block; margin: 20px;">
+        <div class="ships-container" id="ships-container">
+            <h3>Place your ships</h3>
+            <p>Press SPACEBAR to rotate the selected ship</p>
+            <p id="current-ship-info"></p>
+            <button id="ready-button" disabled>Ready</button>
+        </div>
+        <div class="grid-container" style="display: flex; justify-content: center; gap: 20px;">
+            <div>
+                <div class="grid-label">Your Grid</div>
+                <div id="my-grid" class="grid" style="border: 2px solid black;"></div>
+            </div>
+            <div>
+                <div class="grid-label">Opponent's Grid</div>
+                <div id="opponent-grid" class="grid" style="border: 2px solid black;"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // First, define our constants and state
+        const GRID_SIZE = 10;
+        const ships = [
+            { type: 'carrier', size: 5, placed: false },
+            { type: 'battleship', size: 4, placed: false },
+            { type: 'cruiser', size: 3, placed: false },
+            { type: 'submarine', size: 3, placed: false },
+            { type: 'destroyer', size: 2, placed: false }
+        ];
+        let isHorizontal = true;
+        let myBoard = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(null));
+        let currentShipIndex = 0;
+        let currentShip = ships[0];
+        let isPlacingShip = false;
+
+        // Add spacebar handler for rotation
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();  // Prevent page scrolling
+                isHorizontal = !isHorizontal;
+                clearHighlight();
+                if (lastHoveredCell) {
+                    handleCellHover({ type: 'mouseover', target: lastHoveredCell });
+                }
+            }
+        });
+        
+        let lastHoveredCell = null;
+        
+        function updateCurrentShipInfo() {
+            const info = document.getElementById('current-ship-info');
+            if (currentShip && !currentShip.placed) {
+                info.textContent = `Currently placing: ${currentShip.type} (${currentShip.size} spaces)`;
+            } else {
+                info.textContent = 'All ships placed!';
+            }
+        }
+        
+        function handleCellHover(event) {
+            if (!event.target.classList.contains('cell')) return;
+            lastHoveredCell = event.target;
+            isPlacingShip = true;
+            
+            const row = parseInt(event.target.dataset.row);
+            const col = parseInt(event.target.dataset.col);
+            
+            clearHighlight();
+            
+            if (currentShip && !currentShip.placed) {
+                if (canPlaceShip(row, col, currentShip.size, isHorizontal)) {
+                    highlightCells(row, col, currentShip.size, isHorizontal, true);
+                } else {
+                    highlightCells(row, col, currentShip.size, isHorizontal, false);
+                }
+            }
+        }
+        
+        function handleCellLeave(event) {
+            if (!event.target.classList.contains('cell')) return;
+            isPlacingShip = false;
+            clearHighlight();
+        }
+        
+        function handleCellClick(event) {
+            if (!event.target.classList.contains('cell')) return;
+            
+            const row = parseInt(event.target.dataset.row);
+            const col = parseInt(event.target.dataset.col);
+            
+            if (currentShip && !currentShip.placed && canPlaceShip(row, col, currentShip.size, isHorizontal)) {
+                placeShip(row, col, currentShip.size, isHorizontal, currentShip.type);
+                currentShip.placed = true;
+                
+                // Move to next ship
+                currentShipIndex++;
+                if (currentShipIndex < ships.length) {
+                    currentShip = ships[currentShipIndex];
+                }
+                
+                updateCurrentShipInfo();
+                
+                // Check if all ships are placed
+                const allShipsPlaced = ships.every(ship => ship.placed);
+                document.getElementById('ready-button').disabled = !allShipsPlaced;
+                
+                // If all ships are placed, clear any remaining highlights
+                if (allShipsPlaced) {
+                    clearHighlight();
+                }
+            }
+        }
+        
+        function canPlaceShip(row, col, size, horizontal) {
+            if (horizontal) {
+                if (col + size > GRID_SIZE) return false;
+                for (let i = 0; i < size; i++) {
+                    if (myBoard[row][col + i]) return false;
+                }
+            } else {
+                if (row + size > GRID_SIZE) return false;
+                for (let i = 0; i < size; i++) {
+                    if (myBoard[row + i][col]) return false;
+                }
+            }
+            return true;
+        }
+
+        function highlightCells(row, col, size, horizontal, valid) {
+            const cells = document.querySelectorAll('#my-grid .cell');
+            for (let i = 0; i < size; i++) {
+                const index = horizontal 
+                    ? row * GRID_SIZE + (col + i)
+                    : (row + i) * GRID_SIZE + col;
+                if (index < cells.length) {
+                    cells[index].classList.add('ship-preview');
+                    cells[index].classList.add(valid ? 'valid' : 'invalid');
+                }
+            }
+        }
+
+        function clearHighlight() {
+            const cells = document.querySelectorAll('#my-grid .cell');
+            cells.forEach(cell => {
+                cell.classList.remove('ship-preview', 'valid', 'invalid');
+            });
+        }
+
+        function placeShip(row, col, size, horizontal, shipType) {
+            for (let i = 0; i < size; i++) {
+                if (horizontal) {
+                    myBoard[row][col + i] = shipType;
+                    const cell = document.querySelector(`#my-grid .cell[data-row="${row}"][data-col="${col + i}"]`);
+                    cell.classList.add('ship');
+                } else {
+                    myBoard[row + i][col] = shipType;
+                    const cell = document.querySelector(`#my-grid .cell[data-row="${row + i}"][data-col="${col}"]`);
+                    cell.classList.add('ship');
+                }
+            }
+        }
+
+        // Define the createGrid function
+        function createGrid(elementId, isPlayerGrid) {
+            console.log('Creating grid:', elementId);
+            const grid = document.getElementById(elementId);
+            if (!grid) {
+                console.error('Could not find element with id:', elementId);
+                return;
+            }
+            
+            // Create the 10x10 grid
+            for (let i = 0; i < GRID_SIZE; i++) {
+                for (let j = 0; j < GRID_SIZE; j++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.dataset.row = i;
+                    cell.dataset.col = j;
+                    
+                    if (isPlayerGrid) {
+                        cell.addEventListener('mouseover', handleCellHover);
+                        cell.addEventListener('mouseout', handleCellLeave);
+                        cell.addEventListener('click', handleCellClick);
+                    }
+                    
+                    grid.appendChild(cell);
+                }
+            }
+            console.log('Grid created successfully');
+        }
+
+        // Now create the grids
+        createGrid('my-grid', true);
+        createGrid('opponent-grid', false);
+        updateCurrentShipInfo();
+
+        // Make game board visible for testing
+        document.getElementById('game-board').style.display = 'block';
+
+        // WebSocket connection
+        const socket = new WebSocket('ws://192.168.1.179:8080');
+        const statusDiv = document.getElementById('connection-status');
+        const joinButton = document.getElementById('join-game');
+        const gameBoard = document.getElementById('game-board');
+
+        socket.onopen = () => {
+            console.log('WebSocket connection established');
+            statusDiv.textContent = 'Connected to server';
+            joinButton.disabled = false;
+        };
+        
+        socket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+        
+        socket.onclose = () => {
+            console.log('WebSocket connection closed');
+            statusDiv.textContent = 'Disconnected from server';
+            joinButton.disabled = true;
+            gameBoard.style.display = 'none';
+        };
+        
+        joinButton.addEventListener('click', () => {
+            socket.send(JSON.stringify({
+                type: 'join'
+            }));
+            joinButton.disabled = true;
+        });
+        
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            switch(data.type) {
+                case 'waiting':
+                    statusDiv.textContent = data.message;
+                    break;
+                    
+                case 'game_start':
+                    statusDiv.textContent = 'Game started! You are Player ' + data.playerNumber;
+                    gameBoard.style.display = 'block';
+                    break;
+                    
+                case 'opponent_disconnected':
+                    statusDiv.textContent = data.message;
+                    gameBoard.style.display = 'none';
+                    joinButton.disabled = false;
+                    break;
+            }
+        };
+
+        // Add event listeners last
+        document.getElementById('ready-button').addEventListener('click', () => {
+            socket.send(JSON.stringify({
+                type: 'place_ships',
+                board: myBoard
+            }));
+            document.getElementById('ships-container').style.display = 'none';
+        });
+    </script>
+</body>
+</html> 
