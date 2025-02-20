@@ -1,16 +1,14 @@
 {
-  "name": "websockettest",
+  "name": "battleship",
   "version": "1.0.0",
+  "description": "A multiplayer Battleship game using WebSocket",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
-    "ws": "^8.18.0"
-  }
+    "ws": "^8.16.0"
+  },
+  "author": "",
+  "license": "MIT"
 }
