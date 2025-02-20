@@ -52,9 +52,14 @@ function isShipSunk(board, hits, shipType) {
 server.on('connection', (socket) => {
     console.log('Player connected');
     
-    // Assign a unique ID to each socket
     socket.id = Math.random().toString(36).substring(7);
     console.log('Assigned ID:', socket.id);
+    
+    // Send the socket ID to the client immediately after connection
+    socket.send(JSON.stringify({
+        type: 'connection_established',
+        socketId: socket.id
+    }));
     
     socket.on('message', (message) => {
         const data = JSON.parse(message);
@@ -63,15 +68,16 @@ server.on('connection', (socket) => {
         switch(data.type) {
             case 'join':
                 if (waitingPlayer === null) {
-                    // First player joins
                     waitingPlayer = socket;
                     socket.send(JSON.stringify({
                         type: 'waiting',
-                        message: 'Waiting for opponent...'
+                        message: 'Waiting for opponent...',
+                        socketId: socket.id
                     }));
                 } else {
-                    // Second player joins - create a game
                     const gameId = Math.random().toString(36).substring(7);
+                    const firstPlayer = Math.random() < 0.5 ? waitingPlayer : socket;
+                    
                     games.set(gameId, {
                         player1: waitingPlayer,
                         player2: socket,
@@ -79,23 +85,24 @@ server.on('connection', (socket) => {
                         player2Board: null,
                         player1Hits: Array(10).fill().map(() => Array(10).fill(false)),
                         player2Hits: Array(10).fill().map(() => Array(10).fill(false)),
-                        currentTurn: Math.random() < 0.5 ? waitingPlayer.id : socket.id,
+                        currentTurn: firstPlayer.id,
                         gameId: gameId
                     });
                     
                     waitingPlayer.gameId = gameId;
                     socket.gameId = gameId;
                     
-                    // Notify both players
                     waitingPlayer.send(JSON.stringify({
                         type: 'game_start',
                         gameId: gameId,
-                        playerNumber: 1
+                        playerNumber: 1,
+                        socketId: waitingPlayer.id
                     }));
                     socket.send(JSON.stringify({
                         type: 'game_start',
                         gameId: gameId,
-                        playerNumber: 2
+                        playerNumber: 2,
+                        socketId: socket.id
                     }));
                     
                     waitingPlayer = null;
@@ -114,17 +121,18 @@ server.on('connection', (socket) => {
                 }
 
                 if (game.player1Ready && game.player2Ready) {
-                    // Both players ready, start the game
                     const firstPlayer = game.currentTurn === game.player1.id ? 1 : 2;
                     game.player1.send(JSON.stringify({
                         type: 'game_ready',
                         message: 'Both players ready - game starting!',
-                        firstPlayer: firstPlayer
+                        firstPlayer: firstPlayer,
+                        currentTurn: game.currentTurn
                     }));
                     game.player2.send(JSON.stringify({
                         type: 'game_ready',
                         message: 'Both players ready - game starting!',
-                        firstPlayer: firstPlayer
+                        firstPlayer: firstPlayer,
+                        currentTurn: game.currentTurn
                     }));
                 }
                 break;

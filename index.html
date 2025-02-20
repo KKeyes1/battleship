@@ -292,6 +292,12 @@
         // Make game board visible for testing
         document.getElementById('game-board').style.display = 'block';
 
+        // Add variables for game state
+        let playerNumber = null;
+        let isMyTurn = false;
+        let isGameOver = false;
+        let mySocketId = null;
+
         // WebSocket connection
         const socket = new WebSocket('ws://192.168.0.5:8080');
         const statusDiv = document.getElementById('connection-status');
@@ -315,18 +321,16 @@
             gameBoard.style.display = 'none';
         };
         
-        joinButton.addEventListener('click', () => {
-            socket.send(JSON.stringify({
-                type: 'join'
-            }));
-            joinButton.disabled = true;
-        });
-        
         socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
             console.log('Received:', data);
             
             switch(data.type) {
+                case 'connection_established':
+                    mySocketId = data.socketId;
+                    console.log('My socket ID:', mySocketId);
+                    break;
+
                 case 'waiting':
                     statusDiv.textContent = data.message;
                     break;
@@ -339,7 +343,7 @@
                     
                 case 'game_ready':
                     statusDiv.textContent = data.message;
-                    isMyTurn = playerNumber === data.firstPlayer;
+                    isMyTurn = data.currentTurn === mySocketId;
                     updateTurnStatus();
                     break;
 
@@ -350,16 +354,16 @@
                     
                     if (data.isHit) {
                         cell.style.backgroundColor = '#ff4444'; // Red for hit
-                        cell.textContent = '💥';
+                        cell.innerHTML = '💥'; // Using innerHTML for emoji
                         if (data.shipSunk) {
                             alert(`${data.shipType.charAt(0).toUpperCase() + data.shipType.slice(1)} has been sunk!`);
                         }
                     } else {
                         cell.style.backgroundColor = '#44ff44'; // Green for miss
-                        cell.textContent = '×';
+                        cell.innerHTML = '×';
                     }
                     
-                    isMyTurn = data.nextTurn === socket.id;
+                    isMyTurn = data.nextTurn === mySocketId;
                     updateTurnStatus();
                     break;
 
@@ -379,14 +383,11 @@
             }
         };
 
-        // Add variables for game state
-        let playerNumber = null;
-        let isMyTurn = false;
-        let isGameOver = false;
-
         function updateTurnStatus() {
             statusDiv.textContent = isMyTurn ? 'Your turn!' : "Opponent's turn";
-            document.getElementById('opponent-grid').style.cursor = isMyTurn ? 'crosshair' : 'not-allowed';
+            const opponentGrid = document.getElementById('opponent-grid');
+            opponentGrid.style.cursor = isMyTurn ? 'crosshair' : 'not-allowed';
+            opponentGrid.style.pointerEvents = isMyTurn ? 'auto' : 'none';
         }
 
         // Update opponent grid click handler
