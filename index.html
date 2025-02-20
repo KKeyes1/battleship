@@ -376,7 +376,7 @@
                     break;
 
                 case 'game_over':
-                    const isWinner = data.winner === socket.id;
+                    const isWinner = data.winner === mySocketId;
                     statusDiv.textContent = isWinner ? 'Congratulations! You won!' : 'Game Over - You lost!';
                     alert(isWinner ? 'Congratulations! You won!' : 'Game Over - You lost!');
                     // Disable further moves
