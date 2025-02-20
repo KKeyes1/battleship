@@ -321,6 +321,14 @@
             gameBoard.style.display = 'none';
         };
         
+        // Add back the join button click handler
+        joinButton.addEventListener('click', () => {
+            socket.send(JSON.stringify({
+                type: 'join'
+            }));
+            joinButton.disabled = true;
+        });
+        
         socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
             console.log('Received:', data);
