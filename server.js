@@ -7,7 +7,6 @@ let waitingPlayer = null; // Store player waiting for opponent
 
 // Add ship placement validation
 function validateShipPlacement(board) {
-    // Simple validation - just check if all ships are placed
     const shipCounts = {
         carrier: 0,
         battleship: 0,
@@ -27,6 +26,27 @@ function validateShipPlacement(board) {
            shipCounts.cruiser === 3 &&
            shipCounts.submarine === 3 &&
            shipCounts.destroyer === 2;
+}
+
+// Check if a ship is sunk
+function isShipSunk(board, hits, shipType) {
+    const shipLengths = {
+        carrier: 5,
+        battleship: 4,
+        cruiser: 3,
+        submarine: 3,
+        destroyer: 2
+    };
+
+    let hitCount = 0;
+    for (let i = 0; i < board.length; i++) {
+        for (let j = 0; j < board[i].length; j++) {
+            if (board[i][j] === shipType && hits[i][j]) {
+                hitCount++;
+            }
+        }
+    }
+    return hitCount === shipLengths[shipType];
 }
 
 server.on('connection', (socket) => {
@@ -55,8 +75,16 @@ server.on('connection', (socket) => {
                     games.set(gameId, {
                         player1: waitingPlayer,
                         player2: socket,
-                        currentTurn: waitingPlayer.id
+                        player1Board: null,
+                        player2Board: null,
+                        player1Hits: Array(10).fill().map(() => Array(10).fill(false)),
+                        player2Hits: Array(10).fill().map(() => Array(10).fill(false)),
+                        currentTurn: Math.random() < 0.5 ? waitingPlayer.id : socket.id,
+                        gameId: gameId
                     });
+                    
+                    waitingPlayer.gameId = gameId;
+                    socket.gameId = gameId;
                     
                     // Notify both players
                     waitingPlayer.send(JSON.stringify({
@@ -74,32 +102,83 @@ server.on('connection', (socket) => {
                 }
                 break;
             case 'place_ships':
-                if (validateShipPlacement(data.board)) {
-                    // Find the game this player is in
-                    for (let [gameId, game] of games) {
-                        if (game.player1 === socket || game.player2 === socket) {
-                            const playerNum = game.player1 === socket ? 1 : 2;
-                            game[`player${playerNum}Board`] = data.board;
-                            game[`player${playerNum}Ready`] = true;
-                            
-                            // Check if both players are ready
-                            if (game.player1Ready && game.player2Ready) {
-                                game.player1.send(JSON.stringify({
-                                    type: 'game_ready',
-                                    message: 'Both players ready - game starting!'
-                                }));
-                                game.player2.send(JSON.stringify({
-                                    type: 'game_ready',
-                                    message: 'Both players ready - game starting!'
-                                }));
-                            }
-                            break;
-                        }
-                    }
+                const game = games.get(socket.gameId);
+                if (!game) return;
+
+                if (game.player1 === socket) {
+                    game.player1Board = data.board;
+                    game.player1Ready = true;
+                } else {
+                    game.player2Board = data.board;
+                    game.player2Ready = true;
+                }
+
+                if (game.player1Ready && game.player2Ready) {
+                    // Both players ready, start the game
+                    const firstPlayer = game.currentTurn === game.player1.id ? 1 : 2;
+                    game.player1.send(JSON.stringify({
+                        type: 'game_ready',
+                        message: 'Both players ready - game starting!',
+                        firstPlayer: firstPlayer
+                    }));
+                    game.player2.send(JSON.stringify({
+                        type: 'game_ready',
+                        message: 'Both players ready - game starting!',
+                        firstPlayer: firstPlayer
+                    }));
                 }
                 break;
             case 'fire':
-                // Handle torpedo firing
+                const gameState = games.get(socket.gameId);
+                if (!gameState || gameState.currentTurn !== socket.id) return;
+
+                const row = data.position.row;
+                const col = data.position.col;
+                const targetBoard = gameState.player1 === socket ? gameState.player2Board : gameState.player1Board;
+                const hits = gameState.player1 === socket ? gameState.player2Hits : gameState.player1Hits;
+
+                if (hits[row][col]) return; // Already fired at this location
+
+                hits[row][col] = true;
+                const isHit = targetBoard[row][col] !== null;
+                const shipType = targetBoard[row][col];
+                let shipSunk = false;
+
+                if (isHit && shipType) {
+                    shipSunk = isShipSunk(targetBoard, hits, shipType);
+                }
+
+                // Switch turns
+                gameState.currentTurn = gameState.player1.id === socket.id ? gameState.player2.id : gameState.player1.id;
+
+                // Send result to both players
+                const result = {
+                    type: 'fire_result',
+                    position: { row, col },
+                    isHit,
+                    shipType,
+                    shipSunk,
+                    nextTurn: gameState.currentTurn
+                };
+
+                gameState.player1.send(JSON.stringify(result));
+                gameState.player2.send(JSON.stringify(result));
+
+                // Check for game over
+                if (isHit) {
+                    const allShipsSunk = ['carrier', 'battleship', 'cruiser', 'submarine', 'destroyer']
+                        .every(ship => isShipSunk(targetBoard, hits, ship));
+                    
+                    if (allShipsSunk) {
+                        const gameOver = {
+                            type: 'game_over',
+                            winner: socket.id
+                        };
+                        gameState.player1.send(JSON.stringify(gameOver));
+                        gameState.player2.send(JSON.stringify(gameOver));
+                        games.delete(socket.gameId);
+                    }
+                }
                 break;
         }
     });
@@ -109,16 +188,14 @@ server.on('connection', (socket) => {
         if (waitingPlayer === socket) {
             waitingPlayer = null;
         }
-        // Notify opponent if in game
-        games.forEach((game, gameId) => {
-            if (game.player1 === socket || game.player2 === socket) {
-                const opponent = game.player1 === socket ? game.player2 : game.player1;
-                opponent.send(JSON.stringify({
-                    type: 'opponent_disconnected',
-                    message: 'Your opponent has disconnected'
-                }));
-                games.delete(gameId);
-            }
-        });
+        if (socket.gameId && games.has(socket.gameId)) {
+            const game = games.get(socket.gameId);
+            const opponent = game.player1 === socket ? game.player2 : game.player1;
+            opponent.send(JSON.stringify({
+                type: 'opponent_disconnected',
+                message: 'Your opponent has disconnected'
+            }));
+            games.delete(socket.gameId);
+        }
     });
 }); 

@@ -324,6 +324,7 @@
         
         socket.onmessage = (event) => {
             const data = JSON.parse(event.data);
+            console.log('Received:', data);
             
             switch(data.type) {
                 case 'waiting':
@@ -333,6 +334,41 @@
                 case 'game_start':
                     statusDiv.textContent = 'Game started! You are Player ' + data.playerNumber;
                     gameBoard.style.display = 'block';
+                    playerNumber = data.playerNumber;
+                    break;
+                    
+                case 'game_ready':
+                    statusDiv.textContent = data.message;
+                    isMyTurn = playerNumber === data.firstPlayer;
+                    updateTurnStatus();
+                    break;
+
+                case 'fire_result':
+                    const cell = document.querySelector(
+                        `#${isMyTurn ? 'opponent-grid' : 'my-grid'} .cell[data-row="${data.position.row}"][data-col="${data.position.col}"]`
+                    );
+                    
+                    if (data.isHit) {
+                        cell.style.backgroundColor = '#ff4444'; // Red for hit
+                        cell.textContent = '💥';
+                        if (data.shipSunk) {
+                            alert(`${data.shipType.charAt(0).toUpperCase() + data.shipType.slice(1)} has been sunk!`);
+                        }
+                    } else {
+                        cell.style.backgroundColor = '#44ff44'; // Green for miss
+                        cell.textContent = '×';
+                    }
+                    
+                    isMyTurn = data.nextTurn === socket.id;
+                    updateTurnStatus();
+                    break;
+
+                case 'game_over':
+                    const isWinner = data.winner === socket.id;
+                    statusDiv.textContent = isWinner ? 'Congratulations! You won!' : 'Game Over - You lost!';
+                    alert(isWinner ? 'Congratulations! You won!' : 'Game Over - You lost!');
+                    // Disable further moves
+                    isGameOver = true;
                     break;
                     
                 case 'opponent_disconnected':
@@ -342,6 +378,32 @@
                     break;
             }
         };
+
+        // Add variables for game state
+        let playerNumber = null;
+        let isMyTurn = false;
+        let isGameOver = false;
+
+        function updateTurnStatus() {
+            statusDiv.textContent = isMyTurn ? 'Your turn!' : "Opponent's turn";
+            document.getElementById('opponent-grid').style.cursor = isMyTurn ? 'crosshair' : 'not-allowed';
+        }
+
+        // Update opponent grid click handler
+        document.getElementById('opponent-grid').addEventListener('click', (e) => {
+            if (!e.target.classList.contains('cell') || !isMyTurn || isGameOver) return;
+            
+            const row = parseInt(e.target.dataset.row);
+            const col = parseInt(e.target.dataset.col);
+            
+            // Check if cell was already fired at
+            if (e.target.textContent !== '') return;
+            
+            socket.send(JSON.stringify({
+                type: 'fire',
+                position: { row, col }
+            }));
+        });
 
         // Add event listeners last
         document.getElementById('ready-button').addEventListener('click', () => {
